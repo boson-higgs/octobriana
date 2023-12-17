@@ -27,17 +27,15 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <errno.h>
-#include <sys/sem.h>
 #include <semaphore.h>
 
 #define STR_CLOSE   "close"
 #define STR_QUIT    "quit"
-
-#define STR_UP "UP"
-#define STR_UP_OK "UP OK\n"
-#define STR_DOWN "DOWN"
-#define STR_DOWN_OK "DOWN OK\n"
-#define STR_ERR "ERR\n"
+#define STR_UP		"UP"
+#define STR_UP_OK	"UP-OK\n"
+#define STR_DOWN	"DOWN"
+#define STR_DOWN_OK	"DOWN-OK\n"
+#define STR_ERR		"ERR\n"
 
 //***************************************************************************
 // log messages
@@ -48,7 +46,6 @@
 
 // debug flag
 int g_debug = LOG_INFO;
-
 sem_t* g_mutex = nullptr;
 
 void log_msg( int t_log_level, const char *t_form, ... )
@@ -104,45 +101,43 @@ void help( int t_narg, char **t_args )
 }
 
 //***************************************************************************
-
 int up()
 {
-    sem_post(g_mutex);
-    return 1;
+	sem_post( g_mutex );
+	return 1;
 }
 
 int down()
 {
-    sem_wait(g_mutex);
-    return 1;
+	sem_wait( g_mutex );
+	return 1;
 }
 
 void new_client(int l_sock_client, int l_sock_listen)
 {
-    pollfd l_read_poll[ 2 ];
+	pollfd l_read_poll[ 2 ];
 
-    l_read_poll[ 0 ].fd = STDIN_FILENO;
+	l_read_poll[ 0 ].fd = STDIN_FILENO;
     l_read_poll[ 0 ].events = POLLIN;
-    l_read_poll[ 1 ].fd = l_sock_listen;
+    l_read_poll[ 1 ].fd = l_sock_client;
     l_read_poll[ 1 ].events = POLLIN;
 
-    int pid;
-    if((pid = fork()) == 0)
-    {
-        while(1)
-        {
-            //comunication
+	int pid;
+	if (( pid = fork() ) == 0 )
+	{
+        while ( 1  )
+        { // communication
             char l_buf[ 256 ];
 
             // select from fds
             int l_poll = poll( l_read_poll, 2, -1 );
 
-            if(l_poll<0)
+            if ( l_poll < 0 )
             {
                 log_msg( LOG_ERROR, "Function poll failed!" );
                 exit( 1 );
             }
-            /*
+			/*
             // data on stdin?
             if ( l_read_poll[ 0 ].revents & POLLIN )
             {
@@ -161,76 +156,71 @@ void new_client(int l_sock_client, int l_sock_listen)
                         log_msg( LOG_DEBUG, "Sent %d bytes to client.", l_len );
             }
             */
-           //data from client?
-           if(l_read_poll[1].revents & POLLIN)
-           {
-                //read data from socket
+            // data from client?
+            if ( l_read_poll[ 1 ].revents & POLLIN )
+            {
+                // read data from socket
                 int l_len = read( l_sock_client, l_buf, sizeof( l_buf ) );
-                if (!l_len)
+                if ( !l_len )
                 {
-                    log_msg( LOG_DEBUG, "Client closed socket!" );
-                    close( l_sock_client );
-                    break;
+                        log_msg( LOG_DEBUG, "Client closed socket!" );
+                        close( l_sock_client );
+                        break;
                 }
-                else if (l_len < 0)
-                {
-                    log_msg( LOG_ERROR, "Unable to read data from client." );
-                }
+                else if ( l_len < 0 )
+                        log_msg( LOG_DEBUG, "Unable to read data from client." );
                 else
+                        log_msg( LOG_DEBUG, "Read %d bytes from client.", l_len );
+
+				if( !strncasecmp( l_buf, STR_UP, strlen( STR_UP ) ) )
+				{
+					printf("%s", STR_UP);
+					up();
+					send( l_sock_client, STR_UP_OK, strlen( STR_UP_OK ), 0);
+				}
+				else
+				if( !strncasecmp( l_buf, STR_DOWN, strlen( STR_DOWN ) ) )
+				{
+					printf("%s", STR_DOWN);
+					down();
+					send( l_sock_client, STR_DOWN_OK, strlen( STR_DOWN_OK), 0);
+				}
+				else
+					send( l_sock_client, STR_ERR, strlen( STR_ERR ), 0);
+					
+                // write data to client
+                //l_len = write( l_sock_client, l_buf, l_len );
+                if ( l_len < 0 )
+                        log_msg( LOG_ERROR, "Unable to write data to client." );
+
+                // close request?
+                if ( !strncasecmp( l_buf, "close", strlen( STR_CLOSE ) ) )
                 {
-                    log_msg( LOG_DEBUG, "Read %d bytes from client.", l_len );
+                        log_msg( LOG_INFO, "Client sent 'close' request to close connection." );
+                        close( l_sock_client );
+                        log_msg( LOG_INFO, "Connection closed. Waiting for new client." );
+                        break;
                 }
-                if(!strncasecmp(l_buf, STR_UP, strlen(STR_UP)))
-                {
-                    printf("%s", STR_UP);
-                    up();
-                    send(l_sock_client, STR_UP_OK, strlen(STR_UP_OK), 0);
-                }
-                else if(!strncasecmp(l_buf, STR_DOWN, strlen(STR_DOWN)))
-                {
-                    printf("%s", STR_DOWN);
-                    down();
-                    send(l_sock_client, STR_DOWN_OK, strlen(STR_DOWN_OK), 0);
-                }
-                else
-                {
-                    send(l_sock_client, STR_ERR, strlen(STR_ERR), 0);
-                }
-                //write data to client
-                //l_len = write(STDOUT_FILENO, l_buf, l_len);
-                if(l_len < 0)
-                {
-                    log_msg( LOG_ERROR, "Unable to write data to stdout." );
-                }
-                //close request?
-                if(!strncasecmp(l_buf, "close", strlen(STR_CLOSE)))
-                {
-                    log_msg( LOG_INFO, "Client sent 'close' request to close connection." );
-                    close(l_sock_client);
-                    log_msg( LOG_INFO, "Connection closed. Waiting for new client." );
-                    break;
-                }
-           }
-           //request for quit
-           if(!strncasecmp(l_buf, "quit", strlen(STR_QUIT)))
-           {
-               close(l_sock_listen);
-               close(l_sock_client);
-               log_msg( LOG_INFO, "Request to 'quit' entered" );
-               exit(0);
-           }
-        }
-    }
+            }
+            // request for quit
+            if ( !strncasecmp( l_buf, "quit", strlen( STR_QUIT ) ) )
+            {
+                close( l_sock_listen );
+                close( l_sock_client );
+                log_msg( LOG_INFO, "Request to 'quit' entered" );
+                exit( 0 );
+            }
+        } // while communication
+	}
 }
 
+
 int main( int t_narg, char **t_args )
-{
+{	
     if ( t_narg <= 1 ) help( t_narg, t_args );
-
+	
     int l_port = 0;
-
-    char l_c_port[10];
-
+	char l_c_port[10];
     // parsing arguments
     for ( int i = 1; i < t_narg; i++ )
     {
@@ -243,7 +233,7 @@ int main( int t_narg, char **t_args )
         if ( *t_args[ i ] != '-' && !l_port )
         {
             l_port = atoi( t_args[ i ] );
-            strcpy(l_c_port, t_args[i]);
+            strcpy( l_c_port, t_args[ i ] );
             break;
         }
     }
@@ -264,8 +254,8 @@ int main( int t_narg, char **t_args )
         exit( 1 );
     }
 
-    g_mutex = sem_open(l_c_port, O_RDWR | O_CREAT, 0666, 0);
-    sem_init(g_mutex, 1, 1);
+	g_mutex = sem_open( l_c_port, O_RDWR | O_CREAT, 0660, 0 );
+	sem_init( g_mutex, 1, 1 );
 
     in_addr l_addr_any = { INADDR_ANY };
     sockaddr_in l_srv_addr;
@@ -348,9 +338,9 @@ int main( int t_narg, char **t_args )
                 l_sock_client = accept( l_sock_listen, ( sockaddr * ) &l_rsa, ( socklen_t * ) &l_rsa_size );
                 if ( l_sock_client == -1 )
                 {
-                    log_msg( LOG_ERROR, "Unable to accept new client." );
-                    close( l_sock_listen );
-                    exit( 1 );
+                        log_msg( LOG_ERROR, "Unable to accept new client." );
+                        close( l_sock_listen );
+                        exit( 1 );
                 }
                 uint l_lsa = sizeof( l_srv_addr );
                 // my IP
@@ -364,12 +354,12 @@ int main( int t_narg, char **t_args )
 
                 break;
             }
+
         } // while wait for client
-        new_client(l_sock_client, l_sock_listen);
+
+        new_client( l_sock_client, l_sock_listen );
     } // while ( 1 )
 
     return 0;
 }
-
-
 
