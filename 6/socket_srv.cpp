@@ -1,4 +1,4 @@
-#include<iostream>
+#include <iostream>
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -92,41 +92,8 @@ void help( int t_narg, char **t_args )
 
 //***************************************************************************
 
-/*Podrobný rozbor funkce clientfunc:
 
-Řádek 1: Definice funkce clientfunc, která bere socket a clientIndex jako argumenty. socket je file descriptor pro komunikaci s klientem, a clientIndex je index, který identifikuje klienta (a příslušný semafor).
-
-Řádek 3-5: Inicializuje se buffer pro čtení dat od klienta a vypisuje se zpráva "Please wait\n".
-
-Řádek 6: Čeká se na semafor před přijetím tahů od klienta, aby se zajistilo, že pouze jeden klient může hrát v daném čase.
-
-Řádek 8-10: Odesílá se aktuální stav herního pole klientovi a vyzývá ho k zadání tahu.
-
-Řádek 11: Čte se tah od klienta a ukládá do bufferu.
-
-Řádek 12-15: Pokud se nepřijme žádný tah (klient se odpojil nebo došlo k chybě), loguje se zpráva a uzavře se socket.
-
-Řádek 16-17: Zpracovává se tah klienta, rozdělený na řádek a sloupec.
-
-Řádek 19-34: Převádí se písmeno na číslo řádku.
-
-Řádek 36: Aktualizuje se herní pole na základě tahu klienta.
-
-Řádek 37: Odesílá se aktualizované herní pole zpět klientovi.
-
-Řádek 38: Uvolňuje se semafor pro dalšího klienta.
-
-Hlavní funkce main:
-
-Řádky 83-112: Inicializuje se server, včetně vytvoření soketu a nastavení portu pro naslouchání.
-
-Řádky 114-146: Vytváří se sdílená paměť pro herní pole a inicializují se semafory.
-
-Řádky 148-206: Hlavní smyčka serveru, která neustále přijímá nové klienty. Pro každého přijatého klienta se vytvoří nový proces a zavolá se clientfunc.
-
-Řádek 208: Zavření soketu pro nově připojeného klienta.*/
-
-void clientfunc(int socket, int clientIndex){
+void clientfunc(int socket, int clientIndex, char playerSymbol){
     int l_read;
     while(1){
         char buffer[128] = {0};
@@ -161,7 +128,7 @@ void clientfunc(int socket, int clientIndex){
             rowIndex =4;
         }
 
-        g_glb_data->gameBoard[atoi(col)][rowIndex] = 'O';
+        g_glb_data->gameBoard[atoi(col)][rowIndex] = playerSymbol;
         write(socket, g_glb_data->gameBoard, strlen((char*)g_glb_data->gameBoard));
         sem_post(semaphores[!clientIndex]);
     }
@@ -171,7 +138,7 @@ int main( int t_narg, char **t_args )
     if ( t_narg <= 1 ) help( t_narg, t_args );
 
     int l_port = 0;
-    
+
 
     // parsing arguments
     for ( int i = 1; i < t_narg; i++ )
@@ -270,7 +237,7 @@ int main( int t_narg, char **t_args )
             {
                 g_glb_data->gameBoard[i][j] = '-';
             }
-            
+
             g_glb_data->gameBoard[i][5]='\n';
         }
     }
@@ -294,7 +261,7 @@ int main( int t_narg, char **t_args )
             {
                 g_glb_data->gameBoard[i][j] = '.';
             }
-            
+
             g_glb_data->gameBoard[i][5]='\n';
         }
         newSocket = accept(l_sock_listen, (sockaddr*)&l_rsa, (socklen_t*)&l_rsa_size);
@@ -303,13 +270,13 @@ int main( int t_narg, char **t_args )
             close(newSocket);
         }
         clientCounter++;
-        
+	    char playerSymbol = (clientCounter % 2 ==0) ? 'X' : 'O';
+
         if(fork()==0){
-            
-            clientfunc(newSocket,clientCounter);
+
+            clientfunc(newSocket,clientCounter, playerSymbol);
         }
     } // while ( 1 )
     close(newSocket);
     return 0;
 }
-
