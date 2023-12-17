@@ -35,6 +35,8 @@
 
 #define STR_UP "UP"
 #define STR_UP_OK "UP OK\n"
+#define STR_DOWN "DOWN"
+#define STR_DOWN_OK "DOWN OK\n"
 #define STR_ERR "ERR\n"
 
 //***************************************************************************
@@ -183,7 +185,39 @@ void new_client(int l_sock_client, int l_sock_listen)
                     printf("%s", STR_UP);
                     up();
                     send(l_sock_client, STR_UP_OK, strlen(STR_UP_OK), 0);
-                }    
+                }
+                else if(!strncasecmp(l_buf, STR_DOWN, strlen(STR_DOWN)))
+                {
+                    printf("%s", STR_DOWN);
+                    down();
+                    send(l_sock_client, STR_DOWN_OK, strlen(STR_DOWN_OK), 0);
+                }
+                else
+                {
+                    send(l_sock_client, STR_ERR, strlen(STR_ERR), 0);
+                }
+                //write data to client
+                //l_len = write(STDOUT_FILENO, l_buf, l_len);
+                if(l_len < 0)
+                {
+                    log_msg( LOG_ERROR, "Unable to write data to stdout." );
+                }
+                //close request?
+                if(!strncasecmp(l_buf, "close", strlen(STR_CLOSE)))
+                {
+                    log_msg( LOG_INFO, "Client sent 'close' request to close connection." );
+                    close(l_sock_client);
+                    log_msg( LOG_INFO, "Connection closed. Waiting for new client." );
+                    break;
+                }
+           }
+           //request for quit
+           if(!strncasecmp(l_buf, "quit", strlen(STR_QUIT)))
+           {
+               close(l_sock_listen);
+               close(l_sock_client);
+               log_msg( LOG_INFO, "Request to 'quit' entered" );
+               exit(0);
            }
         }
     }
@@ -194,6 +228,8 @@ int main( int t_narg, char **t_args )
     if ( t_narg <= 1 ) help( t_narg, t_args );
 
     int l_port = 0;
+
+    char l_c_port[10];
 
     // parsing arguments
     for ( int i = 1; i < t_narg; i++ )
@@ -207,6 +243,7 @@ int main( int t_narg, char **t_args )
         if ( *t_args[ i ] != '-' && !l_port )
         {
             l_port = atoi( t_args[ i ] );
+            strcpy(l_c_port, t_args[i]);
             break;
         }
     }
@@ -226,6 +263,9 @@ int main( int t_narg, char **t_args )
         log_msg( LOG_ERROR, "Unable to create socket.");
         exit( 1 );
     }
+
+    g_mutex = sem_open(l_c_port, O_RDWR | O_CREAT, 0666, 0);
+    sem_init(g_mutex, 1, 1);
 
     in_addr l_addr_any = { INADDR_ANY };
     sockaddr_in l_srv_addr;
@@ -255,18 +295,6 @@ int main( int t_narg, char **t_args )
     }
 
     log_msg( LOG_INFO, "Enter 'quit' to quit server." );
-
-    int sem_id = semget( IPC_PRIVATE, 1, IPC_CREAT | 0666);
-    if (sem_id == -1)
-    {
-        log_msg( LOG_ERROR, "Unable to create semaphore!" );
-        exit( 1 );
-    }
-    if(semctl(sem_id, 0, SETVAL, 1) == -1)
-    {
-        log_msg( LOG_ERROR, "Unable to set semaphore!" );
-        exit( 1 );
-    }
 
     // go!
     while ( 1 )
@@ -336,158 +364,8 @@ int main( int t_narg, char **t_args )
 
                 break;
             }
-
         } // while wait for client
-
-        // change source from sock_listen to sock_client
-        l_read_poll[ 1 ].fd = l_sock_client;
-
-        while ( 1  )
-        { // communication
-            char l_buf[ 256 ];
-
-            // select from fds
-            int l_poll = poll( l_read_poll, 2, -1 );
-
-            if ( l_poll < 0 )
-            {
-                log_msg( LOG_ERROR, "Function poll failed!" );
-                exit( 1 );
-            }
-
-            // data on stdin?
-            if ( l_read_poll[ 0 ].revents & POLLIN )
-            {
-                // read data from stdin
-                int l_len = read( STDIN_FILENO, l_buf, sizeof( l_buf ) );
-                if ( l_len < 0 )
-                    log_msg( LOG_ERROR, "Unable to read data from stdin." );
-                else
-                    log_msg( LOG_DEBUG, "Read %d bytes from stdin.", l_len );
-
-                // send data to client
-                l_len = write( l_sock_client, l_buf, l_len );
-                if ( l_len < 0 )
-                    log_msg( LOG_ERROR, "Unable to send data to client." );
-                else
-                    log_msg( LOG_DEBUG, "Sent %d bytes to client.", l_len );
-            }
-            // data from client?
-            if ( l_read_poll[ 1 ].revents & POLLIN )
-            {
-                // read data from socket
-                int l_len = read( l_sock_client, l_buf, sizeof( l_buf ) );
-                if ( !l_len )
-                {
-                    log_msg( LOG_DEBUG, "Client closed socket!" );
-                    close( l_sock_client );
-                    break;
-                }
-                else if ( l_len < 0 )
-                {
-                    log_msg( LOG_ERROR, "Unable to read data from client." );
-                    close( l_sock_client );
-                    break;
-                }
-                else
-                    log_msg( LOG_DEBUG, "Read %d bytes from client.", l_len );
-
-                // write data to client
-                l_len = write( STDOUT_FILENO, l_buf, l_len );
-                if ( l_len < 0 )
-                    log_msg( LOG_ERROR, "Unable to write data to stdout." );
-
-                // close request?
-                if ( !strncasecmp( l_buf, "close", strlen( STR_CLOSE ) ) )
-                {
-                    log_msg( LOG_INFO, "Client sent 'close' request to close connection." );
-                    close( l_sock_client );
-                    log_msg( LOG_INFO, "Connection closed. Waiting for new client." );
-                    break;
-                }
-
-                struct sembuf sem_op;
-                //fork a child processs to handle client commads
-                pid_t pid = fork();
-                if(pid == -1)
-                {
-                    log_msg( LOG_ERROR, "Unable to fork!" );
-                    exit( 1 );
-                }
-                else if (pid == 0)
-                {
-                    //child process
-                    while(1)
-                    {
-                        //receive command from client
-                        //..
-                        //process the command
-                        // declare the variable "command"
-                        char command[100];
-                        if(strcmp(command, "UP\n") == 0)
-                        {
-                            sem_op.sem_num = 0;
-                            sem_op.sem_op = -1;
-                            sem_op.sem_flg = 0;
-                            if(semop(sem_id, &sem_op, 1) == -1)
-                            {
-                                log_msg( LOG_ERROR, "Unable to acquire semaphore!" );
-                                exit( 1 );
-                            }
-                            //send "UP OK" response to client
-                            const char* response = "UP OK";
-                            l_len = write(l_sock_client, response, strlen(response));
-                            //release the semaphore
-                            sem_op.sem_op = 1;
-                            if(semop(sem_id, &sem_op, 1) == -1)
-                            {
-                                log_msg( LOG_ERROR, "Unable to release semaphore!" );
-                                exit( 1 );
-                            }
-                            else if(strcmp(command, "DOWN\n") == 0)
-                            {
-                                //acquire the semaphore
-                                struct sembuf sem_op;
-                                sem_op.sem_num = 0;
-                                sem_op.sem_op = -1;
-                                sem_op.sem_flg = 0;
-                                if(semop(sem_id, &sem_op, 1) == -1)
-                                {
-                                    log_msg( LOG_ERROR, "Unable to acquire semaphore!" );
-                                    exit( 1 );
-                                }
-                                //send "DOWN OK" response to client
-                                const char* response2 = "DOWN OK";
-                                l_len = write(l_sock_client, response2, strlen(response));
-                                //release the semaphore
-                                sem_op.sem_op = 1;
-                                if(semop(sem_id, &sem_op, 1) == -1)
-                                {
-                                    log_msg( LOG_ERROR, "Unable to release semaphore!" );
-                                    exit( 1 );
-                                }
-                            }
-            
-                            else
-                            {
-                                //parent process
-                                //...
-                                close( l_sock_client );
-                            }
-                        }
-                    }
-                }
-                
-            }
-            // request for quit
-            if ( !strncasecmp( l_buf, "quit", strlen( STR_QUIT ) ) )
-            {
-                close( l_sock_listen );
-                close( l_sock_client );
-                log_msg( LOG_INFO, "Request to 'quit' entered" );
-                exit( 0 );
-            }
-        } // while communication
+        new_client(l_sock_client, l_sock_listen);
     } // while ( 1 )
 
     return 0;
